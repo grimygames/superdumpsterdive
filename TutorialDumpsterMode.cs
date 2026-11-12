@@ -13,10 +13,11 @@ public class TutorialDumpsterMode : MonoBehaviour, IDumpsterMode
     {
         Welcome,
         FindTarget,
-        FlickJunk,
+        SwipeJunk,
         OpenBag,
         AvoidHazard,
         CollectRecyclable,
+        UseItem,
         Complete
     }
 
@@ -26,7 +27,6 @@ public class TutorialDumpsterMode : MonoBehaviour, IDumpsterMode
         public TutorialStep step;
         [TextArea(3, 5)]
         public string dialogue;
-        [Tooltip("Trigger name for Scroungy's Animator (e.g., 'Talk', 'Point')")]
         public string scroungyAnimTrigger = "Talk";
     }
 
@@ -34,6 +34,7 @@ public class TutorialDumpsterMode : MonoBehaviour, IDumpsterMode
     public GameObject instructionPanel;
     public TMP_Text dialogueText;
     public Button nextButton;
+    public RectTransform tutorialShakeTarget;
 
     [Header("Scroungy Mascot")]
     public Animator scroungyAnimator;
@@ -47,24 +48,28 @@ public class TutorialDumpsterMode : MonoBehaviour, IDumpsterMode
     public TrashData tutorialBagItem;
     public TrashData tutorialNeedleItem;
     public TrashData tutorialCopperItem;
-
-    [Header("Spawn Settings")]
-    [Tooltip("Adjust X and Y to move where tutorial items spawn on the Canvas")]
-    public Vector2 centerSpawnPosition = new Vector2(0f, 300f);
+    public TrashData tutorialRaccoonItem;
 
     [Header("Current State")]
     public TutorialStep currentStep = TutorialStep.Welcome;
 
-    private int junkFlickCount = 0;
-    private const int JUNK_FLICK_GOAL = 2;
+    private Vector2 originalShakePos;
+    private bool isShaking = false;
 
     void Awake()
-    {
-        manager = GetComponent<DumpsterManager>();
-        BindUI();
-    }
+	{
+		// Add this failsafe at the very top
+		if (!Launcher.IsTutorial)
+		{
+			Destroy(this);
+			return;
+		}
 
-    void Start()
+		manager = GetComponent<DumpsterManager>();
+		BindUI();
+	}
+
+	void Start()
     {
         if (manager != null) manager.matchStartTime = Time.time;
         if (instructionPanel != null) instructionPanel.SetActive(true);
@@ -75,79 +80,87 @@ public class TutorialDumpsterMode : MonoBehaviour, IDumpsterMode
             nextButton.onClick.AddListener(OnNextClicked);
         }
 
+        if (tutorialShakeTarget != null)
+        {
+            originalShakePos = tutorialShakeTarget.anchoredPosition;
+        }
+
         SetStep(TutorialStep.Welcome);
     }
 
     private void BindUI()
     {
-        if (instructionPanel == null)
-            instructionPanel = GameObject.Find("TutorialPanel");
+        if (instructionPanel == null) instructionPanel = GameObject.Find("TutorialPanel");
 
         if (instructionPanel != null)
         {
-            if (dialogueText == null)
-                dialogueText = instructionPanel.GetComponentInChildren<TMP_Text>(true);
+            Canvas uiCanvas = instructionPanel.GetComponent<Canvas>();
+            if (uiCanvas == null) uiCanvas = instructionPanel.AddComponent<Canvas>();
+            uiCanvas.overrideSorting = true;
+            uiCanvas.sortingOrder = 100; 
+            
+            if (instructionPanel.GetComponent<GraphicRaycaster>() == null)
+            {
+                instructionPanel.AddComponent<GraphicRaycaster>();
+            }
 
-            if (nextButton == null)
-                nextButton = instructionPanel.GetComponentInChildren<Button>(true);
+            if (dialogueText == null) dialogueText = instructionPanel.GetComponentInChildren<TMP_Text>(true);
+            if (nextButton == null) nextButton = instructionPanel.GetComponentInChildren<Button>(true);
         }
     }
 
     public void SetStep(TutorialStep newStep)
     {
         currentStep = newStep;
+        ClearDumpster();
 
         StepConfig config = steps.Find(s => s.step == currentStep);
 
-        // Update Text
         if (dialogueText != null)
         {
-            dialogueText.text = (config != null && !string.IsNullOrEmpty(config.dialogue)) 
-                ? config.dialogue 
-                : GetDefaultDialogue(currentStep);
+            dialogueText.text = (config != null && !string.IsNullOrEmpty(config.dialogue)) ? config.dialogue : GetDefaultDialogue(currentStep);
         }
 
-        // Trigger Scroungy Animation
         if (scroungyAnimator != null && config != null && !string.IsNullOrEmpty(config.scroungyAnimTrigger))
         {
             scroungyAnimator.SetTrigger(config.scroungyAnimTrigger);
         }
 
-        // Handle Step Logic & Button Visibility
+        SetNextButton(true, currentStep == TutorialStep.Complete ? "EXIT ALLEYWAY" : "NEXT");
+        
         switch (currentStep)
         {
             case TutorialStep.Welcome:
-                SetNextButton(true, "NEXT");
-                break;
-
             case TutorialStep.FindTarget:
-                SetNextButton(false, "NEXT");
-                SpawnTarget();
+                UpdateTopTargetIcon(GetFallbackTarget());
+                TutorialTossIn(GetFallbackTarget());
                 break;
-
-            case TutorialStep.FlickJunk:
-                junkFlickCount = 0;
-                SetNextButton(false, "NEXT");
-                SpawnJunk();
+            case TutorialStep.SwipeJunk:
+                UpdateTopTargetIcon(GetFallbackTarget());
+                TutorialTossIn(GetFallbackJunk());
                 break;
-
             case TutorialStep.OpenBag:
-                SetNextButton(false, "NEXT");
-                SpawnBag();
+                UpdateTopTargetIcon(GetFallbackTarget());
+                TutorialTossIn(GetFallbackBag());
                 break;
-
             case TutorialStep.AvoidHazard:
-                SetNextButton(true, "NEXT");
-                SpawnHazard();
+                UpdateTopTargetIcon(GetFallbackTarget());
+                TutorialTossIn(GetFallbackNeedle());
+                TutorialTossIn(GetFallbackJunk()); 
+                TutorialTossIn(GetFallbackJunk());
                 break;
-
             case TutorialStep.CollectRecyclable:
-                SetNextButton(false, "NEXT");
-                SpawnScrap();
+                UpdateTopTargetIcon(GetFallbackCopper());
+                TutorialTossIn(GetFallbackCopper());
                 break;
-
+            case TutorialStep.UseItem:
+                UpdateTopTargetIcon(GetFallbackTarget());
+                TutorialTossIn(GetFallbackRaccoon());
+                TutorialTossIn(GetFallbackJunk()); 
+                TutorialTossIn(GetFallbackJunk());
+                break;
             case TutorialStep.Complete:
-                SetNextButton(true, "EXIT");
+                // Dumpster remains clean and empty.
                 break;
         }
     }
@@ -157,24 +170,23 @@ public class TutorialDumpsterMode : MonoBehaviour, IDumpsterMode
         if (nextButton != null)
         {
             nextButton.gameObject.SetActive(isVisible);
-            
             TMP_Text btnTextLabel = nextButton.GetComponentInChildren<TMP_Text>();
-            if (btnTextLabel != null)
-            {
-                btnTextLabel.text = buttonText;
-            }
+            if (btnTextLabel != null) btnTextLabel.text = buttonText;
         }
     }
 
     private void OnNextClicked()
     {
         if (currentStep == TutorialStep.Welcome) SetStep(TutorialStep.FindTarget);
+        else if (currentStep == TutorialStep.FindTarget) SetStep(TutorialStep.SwipeJunk);
+        else if (currentStep == TutorialStep.SwipeJunk) SetStep(TutorialStep.OpenBag);
+        else if (currentStep == TutorialStep.OpenBag) SetStep(TutorialStep.AvoidHazard);
         else if (currentStep == TutorialStep.AvoidHazard) SetStep(TutorialStep.CollectRecyclable);
+        else if (currentStep == TutorialStep.CollectRecyclable) SetStep(TutorialStep.UseItem);
+        else if (currentStep == TutorialStep.UseItem) SetStep(TutorialStep.Complete);
         else if (currentStep == TutorialStep.Complete) SceneManager.LoadScene("Lobby");
     }
 
-    // --- Target Icon Helper ---
-    // Forces the UI at the top of the screen to change to whatever the current objective is
     private void UpdateTopTargetIcon(TrashData itemData)
     {
         if (itemData != null)
@@ -185,208 +197,252 @@ public class TutorialDumpsterMode : MonoBehaviour, IDumpsterMode
         }
     }
 
+    private void ClearDumpster()
+    {
+        if (manager != null && manager.spawnArea != null)
+        {
+            foreach (Transform child in manager.spawnArea) Destroy(child.gameObject);
+        }
+    }
+
+    private void TutorialTossIn(TrashData itemData)
+    {
+        if (itemData == null || manager == null) return;
+        float w = manager.areaRect.rect.width / 2f;
+        float h = manager.areaRect.rect.height / 2f;
+
+        Vector2 spawnCeilingOrigin = new Vector2(0f, h + 150f);
+        Vector2 topHalfLandingTarget = new Vector2(Random.Range(-w * 0.5f, w * 0.5f), Random.Range(50f, h * 0.5f));
+
+        manager.SpawnItemUI(itemData, true, spawnCeilingOrigin, topHalfLandingTarget);
+    }
+
+    // --- Standalone Shake & Jumpscare Logic ---
+
+    public void TriggerLocalShake()
+    {
+        if (tutorialShakeTarget != null && !isShaking) StartCoroutine(ShakeCoroutine());
+    }
+
+    private IEnumerator ShakeCoroutine()
+    {
+        isShaking = true;
+        float elapsed = 0f;
+        float duration = 0.35f;
+        float magnitude = 75f; 
+
+        while (elapsed < duration)
+        {
+            elapsed += Time.deltaTime;
+            float damper = 1.0f - (elapsed / duration); 
+            tutorialShakeTarget.anchoredPosition = new Vector2(originalShakePos.x + Random.Range(-1f, 1f) * magnitude * damper, originalShakePos.y + Random.Range(-1f, 1f) * magnitude * damper);
+            yield return null;
+        }
+
+        tutorialShakeTarget.anchoredPosition = originalShakePos;
+        isShaking = false;
+    }
+
+    private IEnumerator RunJumpscareAnimation(GameObject raccoonObj, TrashData itemData)
+    {
+        if (raccoonObj == null) yield break;
+        if (raccoonObj.TryGetComponent(out Button btn)) btn.enabled = false;
+        
+        RectTransform rt = raccoonObj.GetComponent<RectTransform>();
+        Image img = raccoonObj.GetComponentInChildren<Image>();
+        
+        if (raccoonObj.TryGetComponent(out CanvasGroup cg)) Destroy(cg); 
+        if (!raccoonObj.TryGetComponent(out Canvas canvas)) canvas = raccoonObj.AddComponent<Canvas>();
+        canvas.overrideSorting = true;
+        canvas.sortingOrder = 999; 
+
+        if (itemData != null && itemData.angryRaccoonSprite != null && img != null) img.sprite = itemData.angryRaccoonSprite;
+
+        Vector3 startScale = rt.localScale;
+        Vector3 maxJumpScale = Vector3.one * 6.5f; 
+        Vector2 baseAnchoredPos = rt.anchoredPosition;
+        
+        float elapsed = 0f;
+        float rushDuration = 0.25f; 
+        
+        while (elapsed < rushDuration)
+        {
+            elapsed += Time.deltaTime;
+            float percent = elapsed / rushDuration;
+            rt.localScale = Vector3.Lerp(startScale, maxJumpScale, percent);
+            float shakeIntensity = 20f * (1f + percent * 2f);
+            rt.anchoredPosition = Vector2.Lerp(baseAnchoredPos, Vector2.zero, percent) + new Vector2(Random.Range(-shakeIntensity, shakeIntensity), Random.Range(-shakeIntensity, shakeIntensity));
+            yield return null;
+        }
+
+        rt.localScale = maxJumpScale;
+        TriggerLocalShake();
+
+        yield return new WaitForSeconds(1.0f);
+
+        float slideDuration = 0.5f;
+        elapsed = 0f;
+        Vector2 slideStart = rt.anchoredPosition;
+        float canvasBottomCeiling = -(manager.areaRect.rect.height / 2f) - 300f; 
+        Vector2 slideDestination = new Vector2(rt.anchoredPosition.x, canvasBottomCeiling); 
+        
+        while (elapsed < slideDuration)
+        {
+            elapsed += Time.deltaTime;
+            rt.anchoredPosition = Vector2.Lerp(slideStart, slideDestination, (elapsed / slideDuration) * (elapsed / slideDuration));
+            yield return null;
+        }
+        
+        Destroy(raccoonObj);
+        TutorialTossIn(GetFallbackRaccoon()); // Respawn so they can try to swipe it properly
+    }
+
     // --- IDumpsterMode Interface Implementation ---
 
     public void HandleItemClicked(string itemName, GameObject itemObject, TrashData data)
     {
-        if (data == null) return;
+        if (data == null || currentStep == TutorialStep.Complete) return;
+
         Vector2 clickPos = (itemObject != null) ? itemObject.GetComponent<RectTransform>().anchoredPosition : Vector2.zero;
 
-        // Catch Hazard clicks globally during the tutorial
-        if (data == tutorialNeedleItem || (data.itemName != null && data.itemName.ToLower().Contains("needle")))
+        // HAZARD CLICK: Punish & Respawn Hazard
+        if (data.type == TrashData.ItemType.Needle || (data.itemName != null && data.itemName.ToLower().Contains("needle")))
+        {
+            if (itemObject != null) Destroy(itemObject);
+            TriggerLocalShake();
+            
+            if (DumpsterJuiceFX.Instance != null) DumpsterJuiceFX.Instance.TriggerScreenShake();
+            CameraShake shaker = Object.FindObjectOfType<CameraShake>();
+            if (shaker != null) shaker.InduceShake(0.5f, 22f);
+            
+            if (GameFeed.Instance != null) GameFeed.Instance.LogMessage("OUCH! Swipe hazards away!", Color.red);
+            TutorialTossIn(GetFallbackNeedle());
+            return; 
+        }
+
+        // RACCOON CLICK: Jumpscare & Respawn Raccoon
+        if (data.type == TrashData.ItemType.Raccoon)
+        {
+            StartCoroutine(RunJumpscareAnimation(itemObject, data));
+            if (GameFeed.Instance != null) GameFeed.Instance.LogMessage("YIKES! Swipe animals away!", Color.red);
+            return;
+        }
+
+        // BAG CLICK: Pop and spawn the Find Item
+        if (data.type == TrashData.ItemType.Bag)
         {
             if (itemObject != null) Destroy(itemObject);
             
-            if (GameFeed.Instance != null) 
-                GameFeed.Instance.LogMessage("OUCH! Watch out for hazards!", Color.red);
-
-            return; // Stop further logic so we don't accidentally progress a step
+            TrashData targetToSpill = GetFallbackTarget();
+            for (int i = 0; i < 3; i++)
+            {
+                Vector2 offsetTarget = clickPos + (Random.insideUnitCircle * 150f);
+                manager.SpawnItemUI(targetToSpill, true, clickPos, offsetTarget);
+            }
+            return;
         }
+
+        // STANDARD BEHAVIORS
+        if (itemObject != null) Destroy(itemObject);
 
         switch (currentStep)
         {
+            case TutorialStep.Welcome:
             case TutorialStep.FindTarget:
-                if (itemName == manager.myTargetItem)
-                {
-                    if (itemObject != null) Destroy(itemObject);
-                    SetStep(TutorialStep.FlickJunk);
-                }
+                TutorialTossIn(GetFallbackTarget());
                 break;
-
+            case TutorialStep.SwipeJunk:
+                TutorialTossIn(GetFallbackJunk()); 
+                break;
             case TutorialStep.OpenBag:
-                // Check if they clicked the exact tutorial bag OR a generic bag
-                if (data == tutorialBagItem || data.type == TrashData.ItemType.Bag)
+                if (manager.spawnArea.GetComponentsInChildren<DraggableTrash>().Length <= 1) 
                 {
-                    if (itemObject != null) Destroy(itemObject);
-                    
-                    for (int i = 0; i < 3; i++)
-                    {
-                        TrashData drop = manager.GetRandomTrashData();
-                        int loopSafety = 0;
-                        
-                        while (drop != null && drop.type == TrashData.ItemType.Bag && loopSafety < 10)
-                        {
-                            drop = manager.GetRandomTrashData();
-                            loopSafety++;
-                        }
-                        
-                        if (drop != null)
-                        {
-                            manager.SpawnItemUI(drop, true, clickPos, clickPos + (Random.insideUnitCircle * 120f));
-                        }
-                    }
-                    SetStep(TutorialStep.AvoidHazard);
+                    TutorialTossIn(GetFallbackBag());
                 }
                 break;
-
+            case TutorialStep.AvoidHazard:
+                TutorialTossIn(GetFallbackJunk());
+                break;
             case TutorialStep.CollectRecyclable:
-                // Check if they clicked the exact tutorial copper OR generic copper
-                if (data == tutorialCopperItem || data.materialCategory == TrashData.ResourceCategory.Copper)
-                {
-                    manager.currentSessionRewards.copperEarned += data.resourceValueAmount;
-                    if (itemObject != null) Destroy(itemObject);
-                    SetStep(TutorialStep.Complete);
-                }
+                manager.currentSessionRewards.copperEarned += data.resourceValueAmount;
+                TutorialTossIn(GetFallbackCopper());
+                break;
+            case TutorialStep.UseItem:
+                TutorialTossIn(GetFallbackJunk());
                 break;
         }
     }
 
     public void HandleItemTossed(TrashData data)
     {
-        if (data == null) return;
+        if (data == null || currentStep == TutorialStep.Complete) return;
 
-        // SPAWN NEW TRASH WHEN FLICKED: This replaces the item they just threw away
-        TrashData replacementJunk = tutorialJunkItem != null ? tutorialJunkItem : manager.trashLibrary.Find(t => t.type == TrashData.ItemType.Junk);
-        if (replacementJunk != null)
+        switch (currentStep)
         {
-            manager.SpawnItemUI(replacementJunk, true, centerSpawnPosition);
-        }
+            case TutorialStep.Welcome:
+            case TutorialStep.FindTarget:
+                TutorialTossIn(GetFallbackTarget()); 
+                break;
+                
+            case TutorialStep.SwipeJunk:
+                if (data.type == TrashData.ItemType.Junk) TutorialTossIn(GetFallbackTarget());
+                else TutorialTossIn(GetFallbackTarget());
+                break;
 
-        if (currentStep == TutorialStep.FlickJunk)
-        {
-            junkFlickCount++;
-            if (junkFlickCount >= JUNK_FLICK_GOAL)
-            {
-                SetStep(TutorialStep.OpenBag);
-            }
-        }
-    }
+            case TutorialStep.OpenBag:
+                TutorialTossIn(GetFallbackTarget());
+                break;
 
-    // --- Spawners ---
+            case TutorialStep.AvoidHazard:
+                // Swipe the needle correctly -> Needle comes back to keep practicing
+                if (data.type == TrashData.ItemType.Needle || (data.itemName != null && data.itemName.ToLower().Contains("needle"))) 
+                {
+                    TutorialTossIn(GetFallbackNeedle());
+                }
+                else 
+                {
+                    TutorialTossIn(GetFallbackTarget());
+                }
+                break;
 
-    private void SpawnTarget()
-    {
-        TrashData target = tutorialTargetItem != null ? tutorialTargetItem : manager.trashLibrary.Find(t => t.classification == TrashData.GameItemClassification.StandardTarget);
-        if (target != null)
-        {
-            UpdateTopTargetIcon(target);
-            manager.SpawnItemUI(target, false, centerSpawnPosition);
-            StartCoroutine(FlashSpawnedItems(target.itemName, TutorialStep.FindTarget));
-        }
-    }
-
-    private void SpawnJunk()
-    {
-        TrashData junk = tutorialJunkItem != null ? tutorialJunkItem : manager.trashLibrary.Find(t => t.type == TrashData.ItemType.Junk);
-        if (junk != null)
-        {
-            UpdateTopTargetIcon(junk);
-            manager.SpawnItemUI(junk, false, centerSpawnPosition + new Vector2(-130f, 0));
-            manager.SpawnItemUI(junk, false, centerSpawnPosition + new Vector2(130f, 0));
-            
-            StartCoroutine(FlashSpawnedItems(junk.itemName, TutorialStep.FlickJunk));
-        }
-    }
-
-    private void SpawnBag()
-    {
-        TrashData bag = tutorialBagItem != null ? tutorialBagItem : manager.trashLibrary.Find(t => t.type == TrashData.ItemType.Bag);
-        if (bag != null)
-        {
-            UpdateTopTargetIcon(bag);
-            manager.SpawnItemUI(bag, false, centerSpawnPosition);
-            StartCoroutine(FlashSpawnedItems(bag.itemName, TutorialStep.OpenBag));
+            case TutorialStep.CollectRecyclable:
+                TutorialTossIn(GetFallbackCopper());
+                break;
+                
+            case TutorialStep.UseItem:
+                // Swipe the raccoon correctly -> Raccoon comes back to keep practicing
+                if (data.type == TrashData.ItemType.Raccoon) 
+                {
+                    TutorialTossIn(GetFallbackRaccoon());
+                }
+                else 
+                {
+                    TutorialTossIn(GetFallbackTarget());
+                }
+                break;
         }
     }
 
-    private void SpawnHazard()
-    {
-        TrashData hazard = tutorialNeedleItem;
-        if (hazard == null) hazard = manager.trashLibrary.Find(t => t.itemName.ToLower().Contains("needle"));
-
-        if (hazard != null)
-        {
-            UpdateTopTargetIcon(hazard);
-            manager.SpawnItemUI(hazard, false, centerSpawnPosition);
-            StartCoroutine(FlashSpawnedItems(hazard.itemName, TutorialStep.AvoidHazard));
-        }
-    }
-
-    private void SpawnScrap()
-    {
-        TrashData copper = tutorialCopperItem != null ? tutorialCopperItem : manager.trashLibrary.Find(t => t.materialCategory == TrashData.ResourceCategory.Copper);
-        if (copper != null)
-        {
-            UpdateTopTargetIcon(copper);
-            manager.SpawnItemUI(copper, false, centerSpawnPosition);
-            StartCoroutine(FlashSpawnedItems(copper.itemName, TutorialStep.CollectRecyclable));
-        }
-    }
-
-    // --- Enhanced Flashing Coroutine ---
-    private IEnumerator FlashSpawnedItems(string targetName, TutorialStep requiredStep)
-    {
-        // Wait longer to ensure items are fully spawned in the hierarchy
-        yield return new WaitForSeconds(0.1f);
-        
-        List<Image> targetsToFlash = new List<Image>();
-        Image[] allImages = FindObjectsOfType<Image>();
-        
-        // Make search entirely case-insensitive and ignore "(Clone)"
-        string searchName = targetName.ToLower();
-
-        foreach (Image img in allImages)
-        {
-            if (img.gameObject.name.ToLower().Contains(searchName) && img.GetComponent<Button>() != null)
-            {
-                targetsToFlash.Add(img);
-            }
-        }
-
-        // Pulse alpha while we are on the correct step
-        while (currentStep == requiredStep && targetsToFlash.Count > 0)
-        {
-            foreach (Image targetImg in targetsToFlash)
-            {
-                if (targetImg != null) targetImg.color = new Color(1f, 1f, 1f, 0.3f);
-            }
-            yield return new WaitForSeconds(0.25f);
-            
-            foreach (Image targetImg in targetsToFlash)
-            {
-                if (targetImg != null) targetImg.color = new Color(1f, 1f, 1f, 1f);
-            }
-            yield return new WaitForSeconds(0.25f);
-        }
-
-        // Reset to solid color when the step changes
-        foreach (Image targetImg in targetsToFlash)
-        {
-            if (targetImg != null) targetImg.color = Color.white;
-        }
-    }
+    // --- Fallback Data Helpers ---
+    private TrashData GetFallbackTarget() => tutorialTargetItem != null ? tutorialTargetItem : manager.trashLibrary.Find(t => t.classification == TrashData.GameItemClassification.StandardTarget);
+    private TrashData GetFallbackJunk() => tutorialJunkItem != null ? tutorialJunkItem : manager.trashLibrary.Find(t => t.type == TrashData.ItemType.Junk);
+    private TrashData GetFallbackBag() => tutorialBagItem != null ? tutorialBagItem : manager.trashLibrary.Find(t => t.type == TrashData.ItemType.Bag);
+    private TrashData GetFallbackNeedle() => tutorialNeedleItem != null ? tutorialNeedleItem : manager.trashLibrary.Find(t => t.itemName.ToLower().Contains("needle"));
+    private TrashData GetFallbackCopper() => tutorialCopperItem != null ? tutorialCopperItem : manager.trashLibrary.Find(t => t.materialCategory == TrashData.ResourceCategory.Copper);
+    private TrashData GetFallbackRaccoon() => tutorialRaccoonItem != null ? tutorialRaccoonItem : manager.trashLibrary.Find(t => t.type == TrashData.ItemType.Raccoon);
 
     private string GetDefaultDialogue(TutorialStep step)
     {
         switch (step)
         {
-            case TutorialStep.Welcome: return "Hey, Im Scroungy the Dumpster Guide! Let's learn to dive!";
-            case TutorialStep.FindTarget: return "Search your thoughts for something to recycle. Tap that exact item in the pile!";
-            case TutorialStep.FlickJunk: return "If you dont see it yet, Flick the item out of the dumpster to dive deeper. More trash will show up.";
-            case TutorialStep.OpenBag: return "Sometimes you can rip open bags and boxes to find useful junk and recycling. ";
-            case TutorialStep.AvoidHazard: return "Watch out for used needles and shit. Fucking hurts to get poked.";
-            case TutorialStep.CollectRecyclable: return "Snatch all the recycling you can think of and trade it for CASH at the recycling center.";
-            case TutorialStep.Complete: return "Then check out the thrift store and pawn shop to spend some money!";
+            case TutorialStep.Welcome: return "Yo, Im Scroungy! Let's learn to dumpster dive!";
+            case TutorialStep.FindTarget: return "Tap the exact item your thinking of, shown at the top of your screen!";
+            case TutorialStep.SwipeJunk: return "Swipe bullshit junk out of the dumpster to dig deeper for your item.";
+            case TutorialStep.OpenBag: return "Tap bags to rip them open. there is stuff inside!";
+            case TutorialStep.AvoidHazard: return "Watch out for needles and broken glass. That shit hurts";
+            case TutorialStep.CollectRecyclable: return "Recycling that you find like copper can be traded in for cash!";
+            case TutorialStep.UseItem: return " Animals can fuck you up, be careful!";
+            case TutorialStep.Complete: return "Don't forget to trade in your recycling for cash to spend at the thrift store. Now fuck off!";
             default: return "";
         }
     }

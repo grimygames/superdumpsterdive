@@ -3,7 +3,8 @@ using UnityEngine.EventSystems;
 using UnityEngine.UI;
 using Photon.Pun;
 
-public class DraggableTrash : MonoBehaviour, IDragHandler, IBeginDragHandler, IEndDragHandler
+// Added IPointerDownHandler for instant tap response
+public class DraggableTrash : MonoBehaviour, IDragHandler, IBeginDragHandler, IEndDragHandler, IPointerDownHandler
 {
     private RectTransform rectTransform;
     private CanvasGroup canvasGroup;
@@ -15,7 +16,7 @@ public class DraggableTrash : MonoBehaviour, IDragHandler, IBeginDragHandler, IE
 
     void Awake() 
     {
-		Image img = GetComponent<Image>();
+        Image img = GetComponent<Image>();
         if (img == null) img = GetComponentInChildren<Image>();
 
         if (img != null)
@@ -28,6 +29,15 @@ public class DraggableTrash : MonoBehaviour, IDragHandler, IBeginDragHandler, IE
         
         // Cache the button so we can disable it during animations
         itemButton = GetComponent<Button>();
+    }
+
+    // 🌟 INSTANT TACTILE FEEDBACK
+    public void OnPointerDown(PointerEventData eventData)
+    {
+        if (data != null && data.grabSound != null && DumpsterManager.Instance != null)
+        {
+            DumpsterManager.Instance.PlaySound2D(data.grabSound);
+        }
     }
 
     public void OnBeginDrag(PointerEventData eventData) 
@@ -86,6 +96,12 @@ public class DraggableTrash : MonoBehaviour, IDragHandler, IBeginDragHandler, IE
     void TossLogic()
     {
         if (DumpsterManager.Instance == null || DumpsterManager.Instance.activeModeLogic == null) return;
+
+        // 🌟 TOSS OUT SOUND EFFECT
+        if (data != null && data.tossedOutSound != null && DumpsterManager.Instance != null)
+        {
+            DumpsterManager.Instance.PlaySound2D(data.tossedOutSound);
+        }
 
         // 1. Tell the mode manager to score points, penalize, and alert the network
         DumpsterManager.Instance.activeModeLogic.HandleItemTossed(data);

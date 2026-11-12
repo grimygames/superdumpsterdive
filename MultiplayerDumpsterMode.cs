@@ -121,6 +121,7 @@ public class MultiplayerDumpsterMode : MonoBehaviour, IDumpsterMode
         switch (data.type)
         {
             case TrashData.ItemType.Needle:
+				PlayModeAudio(data.specialActionSound);
                 if (gameSync != null) { gameSync.ItemMissed(); gameSync.ItemMissed(); gameSync.ItemMissed(); }
                 if (DumpsterJuiceFX.Instance != null) DumpsterJuiceFX.Instance.TriggerScreenShake();
                 if (TugOfWarJuicer.Instance != null) TugOfWarJuicer.Instance.TriggerScoreFeedback(false);
@@ -132,6 +133,7 @@ public class MultiplayerDumpsterMode : MonoBehaviour, IDumpsterMode
                 return;
 
             case TrashData.ItemType.Diaper:
+				PlayModeAudio(data.specialActionSound);
                 if (gameSync != null && gameSync.diaperScrubScript != null) gameSync.diaperScrubScript.SmearScreen(); 
                 if (DumpsterJuiceFX.Instance != null) DumpsterJuiceFX.Instance.TriggerScreenShake();
                 if (itemObject != null) Destroy(itemObject);
@@ -140,6 +142,7 @@ public class MultiplayerDumpsterMode : MonoBehaviour, IDumpsterMode
                 return;
 
             case TrashData.ItemType.Bag:
+				PlayModeAudio(data.specialActionSound);
                 int spawnCount = Random.Range(4, 7);
                 for (int i = 0; i < spawnCount; i++)
                 {
@@ -158,6 +161,7 @@ public class MultiplayerDumpsterMode : MonoBehaviour, IDumpsterMode
                 return;
                 
             case TrashData.ItemType.WalkieTalkie:
+				PlayModeAudio(data.specialActionSound);
                 if (gameSync != null) gameSync.RevealOpponentTarget(7f);
                 if (itemObject != null) Destroy(itemObject);
                 manager.TossInNewTrash();
@@ -165,6 +169,7 @@ public class MultiplayerDumpsterMode : MonoBehaviour, IDumpsterMode
                 return;
 
             case TrashData.ItemType.Vibrator:
+				PlayModeAudio(data.specialActionSound);
                 if (gameSync != null) gameSync.LaunchVibratorSabotage();
                 if (DumpsterJuiceFX.Instance != null) DumpsterJuiceFX.Instance.TriggerScreenShake();
                 if (itemObject != null) Destroy(itemObject);
@@ -173,6 +178,7 @@ public class MultiplayerDumpsterMode : MonoBehaviour, IDumpsterMode
                 return;
             
             case TrashData.ItemType.Raccoon:
+				PlayModeAudio(data.specialActionSound);
                 Debug.Log("MULTIPLAYER RACCOON CLICKED: Unleashing local punishment!");
                 StartCoroutine(RunLocalMultiplayerJumpscare(raccoonObj: itemObject, itemData: data));
                 if (gameSync != null) 
@@ -186,6 +192,7 @@ public class MultiplayerDumpsterMode : MonoBehaviour, IDumpsterMode
                 return;
 			
 			case TrashData.ItemType.TakeoutBox:
+				PlayModeAudio(data.specialActionSound);
 				if (itemObject != null) Destroy(itemObject);
 				bool isMultiRancid = Random.value > 0.8f; 
 				
@@ -203,6 +210,7 @@ public class MultiplayerDumpsterMode : MonoBehaviour, IDumpsterMode
 				return;
 
 			case TrashData.ItemType.FortuneCookie:
+				PlayModeAudio(data.specialActionSound);
 				if (itemObject != null) Destroy(itemObject);
 				manager.sessionItemsUsed.Add(data.itemSprite);
 				
@@ -325,8 +333,10 @@ public class MultiplayerDumpsterMode : MonoBehaviour, IDumpsterMode
 		}
         if (itemName == manager.myTargetItem)
         {
+            PlayModeAudio(data.foundSound); // 🎵 FOUND SOUND
             if (gameSync != null) gameSync.ItemFound();
             if (TugOfWarJuicer.Instance != null) TugOfWarJuicer.Instance.TriggerScoreFeedback(true);
+            
             if (DumpsterJuiceFX.Instance != null && itemObject != null) DumpsterJuiceFX.Instance.PlayItemFlyToPlayer(itemObject);
             else if (itemObject != null) Destroy(itemObject);
 
@@ -334,8 +344,10 @@ public class MultiplayerDumpsterMode : MonoBehaviour, IDumpsterMode
             manager.TossInNewTrash();
             manager.PickNewTarget();
         }
-        else if (data.type == TrashData.ItemType.Junk)
+        else if (data.type == TrashData.ItemType.Target || data.classification == TrashData.GameItemClassification.StandardTarget)
         {
+            // 🌟 FIX: Junk and Specials are completely ignored here and make no sound.
+            // PlayModeAudio(data.incorrectTapSound); // 🎵 INCORRECT TAP SOUND
             if (GameFeed.Instance != null) GameFeed.Instance.LogMessage("That's not it!!", Color.white);
         }
     }
@@ -402,6 +414,11 @@ public class MultiplayerDumpsterMode : MonoBehaviour, IDumpsterMode
     {
         TrashData raccoonData = manager.trashLibrary.Find(item => item.type == TrashData.ItemType.Raccoon);
         if (raccoonData == null) return;
+		
+		if (raccoonData.specialActionSound != null)
+        {
+            DumpsterManager.Instance.PlaySound2D(raccoonData.specialActionSound);
+        }
 
         GameObject customRaccoonVisualObj = Instantiate(manager.itemPrefab, manager.spawnArea);
         customRaccoonVisualObj.GetComponent<RectTransform>().anchoredPosition = Vector2.zero;
@@ -502,6 +519,14 @@ public class MultiplayerDumpsterMode : MonoBehaviour, IDumpsterMode
             int index = manager.trashLibrary.IndexOf(targetData);
             var networkProps = new ExitGames.Client.Photon.Hashtable { { "TargetIndex", index } };
             PhotonNetwork.LocalPlayer.SetCustomProperties(networkProps);
+        }
+    }
+	
+	private void PlayModeAudio(AudioClip clip)
+    {
+        if (clip != null && DumpsterManager.Instance != null)
+        {
+            DumpsterManager.Instance.PlaySound2D(clip);
         }
     }
 }

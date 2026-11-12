@@ -268,7 +268,18 @@ public class GameSync : MonoBehaviourPunCallbacks
     }
 
     [PunRPC]
-    void RPC_ApplyDiaperEffect() {
+    void RPC_ApplyDiaperEffect() 
+    {
+        // 🌟 PLAY THE DIAPER SOUND FOR THE VICTIM
+        if (DumpsterManager.Instance != null)
+        {
+            TrashData diaperData = DumpsterManager.Instance.trashLibrary.Find(t => t.type == TrashData.ItemType.Diaper);
+            if (diaperData != null && diaperData.specialActionSound != null)
+            {
+                DumpsterManager.Instance.PlaySound2D(diaperData.specialActionSound);
+            }
+        }
+
         if (diaperScrubScript != null) diaperScrubScript.SmearScreen();
     }
 
@@ -446,12 +457,24 @@ public class GameSync : MonoBehaviourPunCallbacks
         }
     }
 
-    [PunRPC]
+	[PunRPC]
     void RPC_ReceiveJunkDrop(int libraryIndex)
     {
         if (DumpsterManager.Instance != null && libraryIndex >= 0 && libraryIndex < DumpsterManager.Instance.trashLibrary.Count)
         {
             TrashData incomingJunk = DumpsterManager.Instance.trashLibrary[libraryIndex];
+
+            // 🌟 PLAY THE IMPACT SOUND FOR THE VICTIM
+            if (incomingJunk != null && incomingJunk.specialActionSound != null)
+            {
+                DumpsterManager.Instance.PlaySound2D(incomingJunk.specialActionSound);
+            }
+            else if (incomingJunk != null && incomingJunk.dropSound != null)
+            {
+                // Fallback in case a standard piece of junk is thrown without a special action sound
+                DumpsterManager.Instance.PlaySound2D(incomingJunk.dropSound);
+            }
+
             DumpsterManager.Instance.SpawnItemUI(incomingJunk, false, Vector2.zero);
 
             Transform spawnArea = DumpsterManager.Instance.spawnArea;

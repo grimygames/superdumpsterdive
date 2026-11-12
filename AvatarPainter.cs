@@ -37,6 +37,10 @@ public class AvatarPainter : MonoBehaviour
     private Vector2 lastDrawPos;
     private bool isFirstStroke = true;
     private RectTransform canvasRect; 
+	
+	[Header("🎵 Audio Feedback")]
+    public AudioSource sprayAudioSource;
+    public AudioClip spraySound;
 
     void Start()
     {
@@ -440,19 +444,34 @@ public class AvatarPainter : MonoBehaviour
 
     // --- 🖌️ DRAWING PIPELINE ---
 
-    void Update()
+	void Update()
     {
         if (Input.GetMouseButton(0))
         {
             if (canvasRect == null) return;
 
-            if (colorPickerOverlayPanel != null && colorPickerOverlayPanel.activeSelf) return;
+            if (colorPickerOverlayPanel != null && colorPickerOverlayPanel.activeSelf) 
+            {
+                StopSpraySound(); // 🌟 Stop sound if picker is open
+                return;
+            }
+
+            if (IsPointerBlockedByUI())
+            {
+                isFirstStroke = true;
+                StopSpraySound(); // 🌟 Stop sound if mouse drags over a UI panel
+                return;
+            }
 
             if (!RectTransformUtility.RectangleContainsScreenPoint(canvasRect, Input.mousePosition, null))
             {
                 isFirstStroke = true; 
+                StopSpraySound(); // 🌟 Stop sound if mouse drags off the canvas
                 return;
             }
+
+            // 🌟 WE ARE ACTIVELY DRAWING: Play the sound!
+            PlaySpraySound();
 
             RectTransformUtility.ScreenPointToLocalPointInRectangle(canvasRect, Input.mousePosition, null, out Vector2 localPos);
             float x = (localPos.x / canvasRect.rect.width + 0.5f) * textureSize;
@@ -476,8 +495,53 @@ public class AvatarPainter : MonoBehaviour
         if (Input.GetMouseButtonUp(0)) 
         {
             isFirstStroke = true;
+            StopSpraySound(); // 🌟 Stop sound the moment the mouse is released
             AutoSaveCurrentProgressLocally();
         }
+    }
+	
+	private void PlaySpraySound()
+    {
+        if (sprayAudioSource != null && spraySound != null)
+        {
+            if (!sprayAudioSource.isPlaying)
+            {
+                sprayAudioSource.clip = spraySound;
+                sprayAudioSource.loop = true; // Ensures the recording loops while holding
+                sprayAudioSource.Play();
+            }
+        }
+    }
+
+    private void StopSpraySound()
+    {
+        if (sprayAudioSource != null && sprayAudioSource.isPlaying)
+        {
+            sprayAudioSource.Stop();
+        }
+    }
+	
+	private bool IsPointerBlockedByUI()
+    {
+        if (UnityEngine.EventSystems.EventSystem.current == null) return false;
+
+        UnityEngine.EventSystems.PointerEventData eventData = new UnityEngine.EventSystems.PointerEventData(UnityEngine.EventSystems.EventSystem.current);
+        eventData.position = new Vector2(Input.mousePosition.x, Input.mousePosition.y);
+        
+        List<UnityEngine.EventSystems.RaycastResult> results = new List<UnityEngine.EventSystems.RaycastResult>();
+        UnityEngine.EventSystems.EventSystem.current.RaycastAll(eventData, results);
+
+        if (results.Count == 0) return false;
+
+        // Check the very first UI object hit by the mouse
+        GameObject topHit = results[0].gameObject;
+
+        // 🌟 FIX: If we hit the drawing canvas OR the cosmetic border frame, it is safe to draw!
+        if (topHit == drawingCanvas.gameObject) return false;
+        if (borderDisplayImage != null && topHit == borderDisplayImage.gameObject) return false;
+
+        // If it's anything else (like a scroll view or store panel), block the stroke
+        return true;
     }
 
     private void AutoSaveCurrentProgressLocally()

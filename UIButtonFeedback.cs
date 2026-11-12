@@ -8,8 +8,11 @@ public class UIButtonFeedback : MonoBehaviour
 
     void Awake()
     {
-        originalScale = Vector3.one;
-        selectedScale = Vector3.one * 0.1f; // Scale up by 1.5x (2x might be too huge, but you can change this to 2f!)
+        // Cache the starting size
+        originalScale = transform.localScale;
+        
+        // 🌟 FIX: Multiply by 1.15f to make it 15% larger (instead of shrinking it to 0.1)
+        selectedScale = originalScale * 1.15f; 
     }
 
     public void Select()

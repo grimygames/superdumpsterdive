@@ -8,6 +8,8 @@ using System.Collections.Generic;
 using ExitGames.Client.Photon;
 using UnityEngine.SceneManagement;
 using Hashtable = ExitGames.Client.Photon.Hashtable;
+using PlayFab;
+using PlayFab.ClientModels;
 
 public class Launcher : MonoBehaviourPunCallbacks
 {
@@ -70,10 +72,23 @@ public class Launcher : MonoBehaviourPunCallbacks
     
     [Header("🌟 Waiting Room Code Display")]
     public TMP_Text waitingRoomCodeText;
+	
+	[Header("🌟 Solo Mode Settings")]
+    public GameObject soloSettingsPanel;
+    public TMP_Text soloPresetDisplayMesh;
+    public Transform highscoreContainer;
+    public GameObject highscoreEntryPrefab; // Assign a UI prefab with HighScoreEntryUI script
+    
+    // Static variables to pass data to the game scene
+    public static float SoloMatchDuration = 60f;
+    public static int SoloTrashSpawnAmount = 45;
+    private int currentSoloPresetIndex = 1;
+	public static int ActiveSoloPresetIndex = 0;
 
     void Start()
     {
         IsTimeAttack = false;
+		IsTutorial = false;
         currentDialedCode = "";
 
         if (PhotonNetwork.InRoom)
@@ -127,15 +142,6 @@ public class Launcher : MonoBehaviourPunCallbacks
         menuPanel.SetActive(false);
         multiplayerPanel.SetActive(true);
         UpdateDumpsterVisualsMatrix();
-    }
-
-    public void StartSoloTimeAttack()
-    {
-		IsTutorial = false;
-        IsTimeAttack = true;
-        ForceUploadLocalAvatarProperties();
-        if (statusText != null) statusText.text = "DIVING SOLO...";
-        SceneManager.LoadScene(gameSceneName);
     }
 
     public void BackToMainMenu()
@@ -707,5 +713,136 @@ public class Launcher : MonoBehaviourPunCallbacks
 		if (statusText != null) statusText.text = "ENTERING TUTORIAL...";
 		SceneManager.LoadScene(gameSceneName);
 	}
+	
+	public void OpenSoloMenu()
+    {
+        IsTimeAttack = true;
+        IsTutorial = false;
+        
+        if (menuPanel != null) menuPanel.SetActive(false);
+        if (soloSettingsPanel != null) soloSettingsPanel.SetActive(true);
+        
+        UpdateSoloCarouselUI();
+        LoadAndDisplayHighScores();
+    }
+
+    public void CycleSoloCarouselLeft()
+    {
+        currentSoloPresetIndex--;
+        if (currentSoloPresetIndex < 0) currentSoloPresetIndex = availablePresets.Length - 1;
+        UpdateSoloCarouselUI();
+		LoadAndDisplayHighScores();
+    }
+
+    public void CycleSoloCarouselRight()
+    {
+        currentSoloPresetIndex++;
+        if (currentSoloPresetIndex >= availablePresets.Length) currentSoloPresetIndex = 0;
+        UpdateSoloCarouselUI();
+		LoadAndDisplayHighScores();
+    }
+
+	private void UpdateSoloCarouselUI()
+    {
+        if (soloPresetDisplayMesh != null && availablePresets.Length > currentSoloPresetIndex)
+        {
+            soloPresetDisplayMesh.text = availablePresets[currentSoloPresetIndex].presetName;
+            
+            // Lock in the variables for the game scene
+            SoloMatchDuration = availablePresets[currentSoloPresetIndex].matchDuration;
+            SoloTrashSpawnAmount = availablePresets[currentSoloPresetIndex].trashSpawnAmount;
+            ActiveSoloPresetIndex = currentSoloPresetIndex; // ADDED THIS LINE
+        }
+    }
+
+    // Overwrite the original StartSoloTimeAttack
+    public void StartSoloTimeAttack()
+    {
+        IsTutorial = false;
+        IsTimeAttack = true;
+        ForceUploadLocalAvatarProperties();
+        if (statusText != null) statusText.text = "DIVING SOLO...";
+        SceneManager.LoadScene(gameSceneName);
+    }
+
+    // --- HIGHSCORE LEADERBOARD ---
+
+	private void LoadAndDisplayHighScores()
+    {
+        if (highscoreContainer == null || highscoreEntryPrefab == null) return;
+        foreach (Transform child in highscoreContainer) Destroy(child.gameObject);
+
+        if (!PlayFabClientAPI.IsClientLoggedIn()) return;
+
+        // Dynamic leaderboard name based on the selected preset (e.g., "SoloScore_0", "SoloScore_1")
+        string statName = "SoloScore_" + currentSoloPresetIndex;
+
+        PlayFabClientAPI.GetLeaderboard(new GetLeaderboardRequest
+        {
+            StatisticName = statName,
+            StartPosition = 0,
+            MaxResultsCount = 25 
+        }, 
+        result => {
+            StartCoroutine(FetchLeaderboardDataCoro(result.Leaderboard));
+        }, 
+        error => {
+            // ADDED: Wipe the board clean if this preset has zero logged scores
+            foreach (Transform child in highscoreContainer) Destroy(child.gameObject);
+            Debug.LogWarning($"Leaderboard {statName} is empty or hasn't been created yet.");
+        });
+    }
+
+    private IEnumerator FetchLeaderboardDataCoro(List<PlayerLeaderboardEntry> leaderboard)
+    {
+        // Clear again to prevent duplicates if the player clicked quickly
+        foreach (Transform child in highscoreContainer) Destroy(child.gameObject);
+
+        foreach (var entry in leaderboard)
+        {
+            GameObject go = Instantiate(highscoreEntryPrefab, highscoreContainer);
+            HighScoreEntryUI ui = go.GetComponent<HighScoreEntryUI>();
+            if (ui == null) continue;
+
+            // Display the score instantly while the graphics load
+            ui.Setup(entry.StatValue, null, null);
+
+            // Fetch this specific player's Public Data
+            PlayFabClientAPI.GetUserData(new GetUserDataRequest {
+                PlayFabId = entry.PlayFabId,
+                Keys = new List<string> { "PublicAvatar", "PublicBorder" }
+            }, 
+            userDataResult => {
+                Sprite avatarSprite = null;
+                Sprite borderSprite = null;
+
+                if (userDataResult.Data.ContainsKey("PublicAvatar"))
+                {
+                    ConvertBase64ToSprite(userDataResult.Data["PublicAvatar"].Value, out avatarSprite);
+                }
+                if (userDataResult.Data.ContainsKey("PublicBorder"))
+                {
+                    borderSprite = GetBorderSpriteById(userDataResult.Data["PublicBorder"].Value);
+                }
+
+                // Update the UI with their loaded graphics
+                ui.Setup(entry.StatValue, avatarSprite, borderSprite);
+            }, 
+            error => {
+                Debug.LogWarning("Failed to get graphics for " + entry.PlayFabId);
+            });
+
+            // Brief delay to prevent hitting PlayFab API rate limits
+            yield return new WaitForSeconds(0.1f);
+        }
+    }
+	
+	public void CloseSoloMenu()
+    {
+        IsTimeAttack = false; // Reset the flag
+        
+        if (soloSettingsPanel != null) soloSettingsPanel.SetActive(false);
+        if (menuPanel != null) menuPanel.SetActive(true);
+    }
 	
 }

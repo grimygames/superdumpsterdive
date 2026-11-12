@@ -215,6 +215,16 @@ public class DumpsterJuiceFX : MonoBehaviour
     // --- EFFECT 5: VIBRATOR SABOTAGE (Moved from GameSync) ---
     public void PlayVibratorSlam(Sprite vibratorSprite)
     {
+        // 🌟 PLAY THE SOUND FOR THE VICTIM
+        if (DumpsterManager.Instance != null)
+        {
+            TrashData vibData = DumpsterManager.Instance.trashLibrary.Find(t => t.type == TrashData.ItemType.Vibrator);
+            if (vibData != null && vibData.specialActionSound != null)
+            {
+                DumpsterManager.Instance.PlaySound2D(vibData.specialActionSound);
+            }
+        }
+
         StartCoroutine(VibratorSabotageRoutine(vibratorSprite));
     }
 
@@ -322,4 +332,6 @@ public class DumpsterJuiceFX : MonoBehaviour
         // Clears the tracker when the animation finishes naturally
         activeFortuneRoutine = null; 
     }
+	
+	
 }

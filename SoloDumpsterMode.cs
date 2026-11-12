@@ -33,6 +33,7 @@ public class SoloDumpsterMode : MonoBehaviour, IDumpsterMode
         switch (data.type)
         {
             case TrashData.ItemType.Needle:
+				PlayModeAudio(data.specialActionSound);
                 if (timeAttackLogic != null) timeAttackLogic.AddTime(-10f);
                 if (DumpsterJuiceFX.Instance != null) DumpsterJuiceFX.Instance.TriggerScreenShake();
                 if (TugOfWarJuicer.Instance != null) TugOfWarJuicer.Instance.TriggerScoreFeedback(false); 
@@ -44,6 +45,12 @@ public class SoloDumpsterMode : MonoBehaviour, IDumpsterMode
                 return;
 
             case TrashData.ItemType.Diaper:
+                PlayModeAudio(data.specialActionSound); // 🎵 SPECIAL ACTION SOUND
+                
+                // 🌟 FIX: Grab the diaper script directly for Solo mode
+                DiaperScrub soloScrub = Object.FindObjectOfType<DiaperScrub>();
+                if (soloScrub != null) soloScrub.SmearScreen();
+                
                 if (DumpsterJuiceFX.Instance != null) DumpsterJuiceFX.Instance.TriggerScreenShake();
                 if (itemObject != null) Destroy(itemObject);
                 manager.TossInNewTrash();
@@ -51,6 +58,7 @@ public class SoloDumpsterMode : MonoBehaviour, IDumpsterMode
                 return;
 
             case TrashData.ItemType.Bag:
+				PlayModeAudio(data.specialActionSound);
                 int burstCount = Random.Range(5, 9);
                 for (int i = 0; i < burstCount; i++)
                 {
@@ -68,6 +76,7 @@ public class SoloDumpsterMode : MonoBehaviour, IDumpsterMode
                 return;
                 
             case TrashData.ItemType.WalkieTalkie:
+				PlayModeAudio(data.specialActionSound);
                 HighlightSoloTargets();
                 if (itemObject != null) Destroy(itemObject);
                 manager.TossInNewTrash();
@@ -76,12 +85,14 @@ public class SoloDumpsterMode : MonoBehaviour, IDumpsterMode
                 
                 
             case TrashData.ItemType.Raccoon:
+				PlayModeAudio(data.specialActionSound);
                 Debug.Log("SOLO RACCOON: You woke the beast!");
                 StartCoroutine(RunJumpscareAnimation(itemObject, data));
                 if (timeAttackLogic != null) timeAttackLogic.AddTime(-5f);
                 return;
 				
 			case TrashData.ItemType.TakeoutBox:
+				PlayModeAudio(data.specialActionSound);
 				if (itemObject != null) Destroy(itemObject);
 				// 80% chance for Cookie, 20% chance for Rancid
 				bool isRancid = Random.value > 0.8f; 
@@ -101,6 +112,7 @@ public class SoloDumpsterMode : MonoBehaviour, IDumpsterMode
 				return;
 
 			case TrashData.ItemType.FortuneCookie:
+				PlayModeAudio(data.specialActionSound);
 				if (itemObject != null) Destroy(itemObject);
 				manager.sessionItemsUsed.Add(data.itemSprite);
 				
@@ -170,6 +182,7 @@ public class SoloDumpsterMode : MonoBehaviour, IDumpsterMode
 				return;
 
 			case TrashData.ItemType.Vibrator:
+				PlayModeAudio(data.specialActionSound);
 				if (itemObject != null) Destroy(itemObject);
 				manager.sessionItemsUsed.Add(data.itemSprite);
 				
@@ -230,6 +243,8 @@ public class SoloDumpsterMode : MonoBehaviour, IDumpsterMode
 		}
         if (itemName == manager.myTargetItem)
         {
+            PlayModeAudio(data.foundSound); // 🎵 FOUND SOUND
+            
             if (timeAttackLogic != null) timeAttackLogic.OnItemFound();
             if (TugOfWarJuicer.Instance != null) TugOfWarJuicer.Instance.TriggerScoreFeedback(true); 
             
@@ -240,8 +255,11 @@ public class SoloDumpsterMode : MonoBehaviour, IDumpsterMode
             manager.TossInNewTrash();
             manager.PickNewTarget();
         }
-        else if (data.type == TrashData.ItemType.Junk)
+        else if (data.type == TrashData.ItemType.Target || data.classification == TrashData.GameItemClassification.StandardTarget)
         {
+            // 🌟 FIX: ONLY play the incorrect tap sound if they tapped a legitimate target item that isn't the active one.
+            // Junk and Specials are completely ignored here and make no sound.
+            PlayModeAudio(data.incorrectTapSound); // 🎵 INCORRECT TAP SOUND
             if (GameFeed.Instance != null) GameFeed.Instance.LogMessage("That's not it!", Color.red);
         }
     }
@@ -428,4 +446,12 @@ public class SoloDumpsterMode : MonoBehaviour, IDumpsterMode
 				}
 			}
 		}
+		
+	private void PlayModeAudio(AudioClip clip)
+    {
+        if (clip != null && DumpsterManager.Instance != null)
+        {
+            DumpsterManager.Instance.PlaySound2D(clip);
+        }
+    }
 }

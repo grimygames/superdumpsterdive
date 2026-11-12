@@ -47,7 +47,7 @@ public class DumpsterStoreUI : MonoBehaviour
     public TMP_Text glassCountField;
     public TMP_Text plasticCountField;
     public TMP_Text otherCountField; 
-	public TMP_Text copperCountField;
+    public TMP_Text copperCountField;
     public TMP_Text borderIdField;
 
     [Header("📈 Market Price Displays (Recycle Tab)")]
@@ -72,7 +72,13 @@ public class DumpsterStoreUI : MonoBehaviour
     public AudioSource uiAudioSource;
     public AudioClip openSound;
     public AudioClip tickSound;
-    public AudioClip cashRegisterSound;
+    public AudioClip cashRegisterSound; // Used for Border purchases
+    
+    [Header("♻️ Recycle Sell Sounds")]
+    public AudioClip sellAluminumSound;
+    public AudioClip sellGlassSound;
+    public AudioClip sellPlasticSound;
+    public AudioClip sellCopperSound;
 
     private float currentAlumPrice;
     private float currentGlassPrice;
@@ -195,35 +201,29 @@ public class DumpsterStoreUI : MonoBehaviour
         }
     }
 
-	// --- Real-Money Color Wheel Purchase Trigger ---
-	public void BuyColorWheelRealMoney()
-	{
-		if (PlayFabAuthBridge.Instance == null || PlayFabAuthBridge.Instance.profile == null)
-		{
-			Debug.LogError("[STORE] PlayFab profile not connected. Cannot start purchase.");
-			return;
-		}
+    // --- Real-Money Color Wheel Purchase Trigger ---
+    public void BuyColorWheelRealMoney()
+    {
+        if (PlayFabAuthBridge.Instance == null || PlayFabAuthBridge.Instance.profile == null)
+        {
+            Debug.LogError("[STORE] PlayFab profile not connected. Cannot start purchase.");
+            return;
+        }
 
-		// Check if already owned
-		if (PlayFabAuthBridge.Instance.profile.ownsCustomColorWheel)
-		{
-			Debug.Log("[STORE] Player already owns the Custom Color Wheel!");
-			return;
-		}
+        if (PlayFabAuthBridge.Instance.profile.ownsCustomColorWheel)
+        {
+            Debug.Log("[STORE] Player already owns the Custom Color Wheel!");
+            return;
+        }
 
-		// 🌟 1. Grab actual PlayFab ID (fallback to device ID if offline/guest)
-		string trackingId = !string.IsNullOrEmpty(PlayFabAuthBridge.Instance.MyPlayFabId) 
-			? PlayFabAuthBridge.Instance.MyPlayFabId 
-			: SystemInfo.deviceUniqueIdentifier;
+        string trackingId = !string.IsNullOrEmpty(PlayFabAuthBridge.Instance.MyPlayFabId) 
+            ? PlayFabAuthBridge.Instance.MyPlayFabId 
+            : SystemInfo.deviceUniqueIdentifier;
 
-		// 🌟 2. Construct Stripe URL with tracking reference
-		string stripeCheckoutUrl = $"https://buy.stripe.com/test_aFa8wQ2eEe0e7uC2fJ87K00?client_reference_id={trackingId}";
-
-		// 🌟 3. Application.OpenURL automatically handles WebGL browser tabs cleanly!
-		Application.OpenURL(stripeCheckoutUrl);
-
-		Debug.Log($"[STORE] Opening real-money Checkout for player ID: {trackingId}");
-	}
+        string stripeCheckoutUrl = $"https://buy.stripe.com/test_aFa8wQ2eEe0e7uC2fJ87K00?client_reference_id={trackingId}";
+        Application.OpenURL(stripeCheckoutUrl);
+        Debug.Log($"[STORE] Opening real-money Checkout for player ID: {trackingId}");
+    }
 
     public void RefreshColorWheelTabState()
     {
@@ -483,30 +483,35 @@ public class DumpsterStoreUI : MonoBehaviour
 
         float earnedAmount = 0f;
         int itemAmount = 0;
+        AudioClip soundToPlay = null;
 
         if (materialType == "Aluminum" && profile.aluminumCount > 0)
         {
             itemAmount = profile.aluminumCount;
             earnedAmount = itemAmount * currentAlumPrice;
             profile.aluminumCount = 0;
+            soundToPlay = sellAluminumSound;
         }
         else if (materialType == "Glass" && profile.glassCount > 0)
         {
             itemAmount = profile.glassCount;
             earnedAmount = itemAmount * currentGlassPrice;
             profile.glassCount = 0;
+            soundToPlay = sellGlassSound;
         }
         else if (materialType == "Plastic" && profile.plasticCount > 0)
         {
             itemAmount = profile.plasticCount;
             earnedAmount = itemAmount * currentPlastPrice;
             profile.plasticCount = 0;
+            soundToPlay = sellPlasticSound;
         }
         else if (materialType == "Copper" && profile.copperCount > 0) 
         {
             itemAmount = profile.copperCount;                       
             earnedAmount = itemAmount * currentCopperPrice;
             profile.copperCount = 0;                                 
+            soundToPlay = sellCopperSound;
         }
 
         if (earnedAmount > 0)
@@ -514,8 +519,8 @@ public class DumpsterStoreUI : MonoBehaviour
             profile.cashBalance += earnedAmount;
             PlayFabAuthBridge.Instance.SaveProgressToCloud();
             
-            if (uiAudioSource != null && cashRegisterSound != null) 
-                uiAudioSource.PlayOneShot(cashRegisterSound);
+            if (uiAudioSource != null && soundToPlay != null) 
+                uiAudioSource.PlayOneShot(soundToPlay);
 
             RefreshPersistentDashboard(false);
         }

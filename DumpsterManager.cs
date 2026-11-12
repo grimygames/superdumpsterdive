@@ -34,44 +34,82 @@ public class DumpsterManager : MonoBehaviour
 	
 	[Header("Current Session Data Cache")]
 	public MatchSessionRewards currentSessionRewards = new MatchSessionRewards();
+	
+	[Header("Audio Optimization Pool")]
+    private List<AudioSource> audioPool = new List<AudioSource>();
+    private const int AUDIO_POOL_SIZE = 12;
 
     void Awake()
     {
         Instance = this;
         areaRect = spawnArea.GetComponent<RectTransform>();
+
+        // Pre-warm the audio pool to eliminate lag spikes
+        for (int i = 0; i < AUDIO_POOL_SIZE; i++)
+        {
+            AudioSource src = gameObject.AddComponent<AudioSource>();
+            src.playOnAwake = false;
+            src.spatialBlend = 0f; // Forces strictly 2D UI sound
+            audioPool.Add(src);
+        }
     }
 
 	void Start()
-	{
-		currentSessionRewards.Clear();
-		int initialTrashCount = 250; 
+    {
+        currentSessionRewards.Clear();
+        int initialTrashCount = 250; 
 
-		if (Launcher.IsTutorial)
-		{
-			// 1. Attach tutorial logic dynamically to handle IDumpsterMode interactions
-			activeModeLogic = gameObject.AddComponent<TutorialDumpsterMode>();
-			
-			// 2. Prevent the 250 random items from spawning so tutorial steps control the spawns
-			initialTrashCount = 0; 
-		}
-		else if (Launcher.IsTimeAttack)
-		{
-			activeModeLogic = gameObject.AddComponent<SoloDumpsterMode>();
-		}
-		else
-		{
-			activeModeLogic = gameObject.AddComponent<MultiplayerDumpsterMode>();
+        GameObject tutorialUI = GameObject.Find("TutorialPanel");
 
-			if (PhotonNetwork.InRoom && PhotonNetwork.CurrentRoom.CustomProperties.TryGetValue("TrashSpawnAmount", out object spawnCountObj))
-			{
-				initialTrashCount = System.Convert.ToInt32(spawnCountObj);
-			}
-		}
+        if (Launcher.IsTutorial)
+        {
+            activeModeLogic = gameObject.AddComponent<TutorialDumpsterMode>();
+            initialTrashCount = 0; 
+        }
+        else 
+        {
+            if (tutorialUI != null) tutorialUI.SetActive(false);
 
-		BuildWeightedPoolByRarity();
-		PrewarmRainPool(); 
-		StartCoroutine(InitialDumpsterFillPipeline(initialTrashCount));
-	}
+            if (Launcher.IsTimeAttack)
+            {
+                activeModeLogic = gameObject.AddComponent<SoloDumpsterMode>();
+                
+                // PULL THE PRESET TRASH COUNT HERE
+                initialTrashCount = Launcher.SoloTrashSpawnAmount; 
+            }
+            else
+            {
+                activeModeLogic = gameObject.AddComponent<MultiplayerDumpsterMode>();
+                if (PhotonNetwork.InRoom && PhotonNetwork.CurrentRoom.CustomProperties.TryGetValue("TrashSpawnAmount", out object spawnCountObj))
+                {
+                    initialTrashCount = System.Convert.ToInt32(spawnCountObj);
+                }
+            }
+        }
+
+        BuildWeightedPoolByRarity();
+        PrewarmRainPool(); 
+        StartCoroutine(InitialDumpsterFillPipeline(initialTrashCount));
+    }
+	
+	public void PlaySound2D(AudioClip clip)
+    {
+        if (clip == null) return;
+        
+        foreach (AudioSource src in audioPool)
+        {
+            if (!src.isPlaying)
+            {
+                src.clip = clip;
+                src.Play();
+                return;
+            }
+        }
+        
+        // Failsafe: If all 12 are currently playing, hijack the oldest one
+        audioPool[0].clip = clip;
+        audioPool[0].Play();
+    }
 
     void BuildWeightedPoolByRarity()
     {
@@ -149,7 +187,7 @@ public class DumpsterManager : MonoBehaviour
         SpawnItemUI(dataToSpawn, true, spawnCeilingOrigin, randomInternalTarget);
     }
 
-    public void SpawnItemUI(TrashData data, bool isSpilling, Vector2 origin, Vector2? targetOverride = null)
+	public void SpawnItemUI(TrashData data, bool isSpilling, Vector2 origin, Vector2? targetOverride = null)
     {
         if (data == null) return;
 
@@ -189,7 +227,9 @@ public class DumpsterManager : MonoBehaviour
             safeTarget.y = Mathf.Clamp(safeTarget.y, -h + halfItemHeight, h - halfItemHeight);
 
             float speedModifier = Mathf.Clamp(data.weight, 0.5f, 3.0f);
-            StartCoroutine(AnimateSpill(rt, safeTarget, 0.6f / speedModifier, halfItemHeight));
+            
+            // 🌟 PASSED THE AUDIO CLIP INTO THE ANIMATION
+            StartCoroutine(AnimateSpill(rt, safeTarget, 0.6f / speedModifier, halfItemHeight, data.dropSound));
         }
         else
         {
@@ -270,7 +310,7 @@ public class DumpsterManager : MonoBehaviour
         }
     }
 
-    IEnumerator AnimateSpill(RectTransform rt, Vector2 target, float dur, float halfHeight)
+	IEnumerator AnimateSpill(RectTransform rt, Vector2 target, float dur, float halfHeight, AudioClip landSound)
     {
         float t = 0;
         Vector2 start = rt.anchoredPosition;
@@ -294,6 +334,12 @@ public class DumpsterManager : MonoBehaviour
         }
 
         if (rt != null) rt.anchoredPosition = target;
+
+        // 🌟 PLAYS THE SOUND EXACTLY WHEN IT HITS THE FLOOR
+        if (landSound != null && Time.timeSinceLevelLoad > 1.5f)
+        {
+            PlaySound2D(landSound);
+        }
     }
 
     public void TriggerTrashStorm()
